@@ -1,0 +1,7 @@
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+/Материалы_преподавателя/

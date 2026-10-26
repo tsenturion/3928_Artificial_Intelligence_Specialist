@@ -1,0 +1,30 @@
+[
+  {
+    "kind_key": "текст",
+    "kind_clean": "Текст"
+  },
+  {
+    "kind_key": "text",
+    "kind_clean": "Текст"
+  },
+  {
+    "kind_key": "изображение",
+    "kind_clean": "Изображение"
+  },
+  {
+    "kind_key": "изображения",
+    "kind_clean": "Изображение"
+  },
+  {
+    "kind_key": "image",
+    "kind_clean": "Изображение"
+  },
+  {
+    "kind_key": "аудио",
+    "kind_clean": "Аудио"
+  },
+  {
+    "kind_key": "audio",
+    "kind_clean": "Аудио"
+  }
+]
