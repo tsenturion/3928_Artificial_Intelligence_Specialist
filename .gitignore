@@ -5,3 +5,4 @@ GEMINI.md
 __pycache__/
 *.py[cod]
 /Материалы_преподавателя/
+/.venv_frameworks/

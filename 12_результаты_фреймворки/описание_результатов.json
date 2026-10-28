@@ -1,0 +1,20 @@
+{
+  "порядок_признаков": [
+    "Сигнал 1",
+    "Сигнал 2"
+  ],
+  "backend_keras": "tensorflow",
+  "версии": {
+    "python": "3.13.13",
+    "keras": "3.15.1",
+    "torch": "2.11.0+xpu",
+    "tensorflow": "2.21.0",
+    "scikit_learn": "1.8.0"
+  },
+  "tensorflow_выполнен": true,
+  "файлы": {
+    "keras": "модель_keras.keras",
+    "pytorch": "модель_pytorch.pt",
+    "подготовка": "подготовка_признаков.joblib"
+  }
+}
