@@ -1,0 +1,151 @@
+# Git хранит код и указатели DVC, GitHub Release — небольшой снимок DVC-хранилища.
+# На каждый новый набор данных сначала публикуется support-router-data-v<версия>.
+# Архив готовит support-router/Подготовить_данные_CI.ps1.
+name: Support Router CI-CD
+
+on:
+  push:
+    branches: [main]
+    paths: ['support-router/**', '.github/workflows/support-router.yml']
+  pull_request:
+    paths: ['support-router/**', '.github/workflows/support-router.yml']
+  workflow_dispatch:
+
+# Параллельный старый запуск не должен продвигать образ поверх нового.
+concurrency:
+  group: support-router-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Запись используется только шагом публикации из main; в PR публикация пропускается.
+  packages: write
+
+jobs:
+  check-and-deliver:
+    name: Данные, модель, API, Docker и выпуск
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: support-router
+    env:
+      PYTHONUTF8: '1'
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      SUPPORT_ROUTER_PORT: '18080'
+    steps:
+      - name: Получить исходный код
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Подготовить Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Установить зависимости проекта и DVC
+        run: python -m pip install -e ".[dev,mlops]"
+
+      - name: Восстановить выбранную версию данных через DVC
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          DATA_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("params.toml", "rb"))["data"]["version"])')
+          gh release download "support-router-data-v$DATA_VERSION" \
+            --pattern support-router-data.zip --output "$RUNNER_TEMP/support-router-data.zip"
+          python -m zipfile -e "$RUNNER_TEMP/support-router-data.zip" "$RUNNER_TEMP/support-router-data"
+          python -m dvc remote add --local ci "$RUNNER_TEMP/support-router-data"
+          python -m dvc pull data/raw.dvc --remote ci
+
+      - name: Воспроизвести обучение и проверить порог качества
+        # Ошибка evaluate или verify останавливает выпуск, даже если тесты API прошли.
+        run: |
+          python -m dvc repro
+          python -m support_router verify
+
+      - name: Проверить компоненты приложения
+        # Проверяется этот проект, без запуска материалов и окружений остального курса.
+        run: python -m pytest -p no:asyncio tests --junitxml=reports/tests.xml
+
+      - name: Сформировать имя образа
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/support-router"
+          echo "SUPPORT_ROUTER_IMAGE=$IMAGE:sha-$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo "IMAGE_REPOSITORY=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Собрать интерфейс и рабочий Docker-образ
+        # Один и тот же образ проходит проверку и затем отправляется в реестр.
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$SUPPORT_ROUTER_IMAGE" .
+
+      - name: Проверить контейнер и сохранение мониторинга
+        run: |
+          docker compose -p support-router-ci -f compose.release.yaml up -d --wait --wait-timeout 90 --pull never
+          python scripts/check_service.py --url http://127.0.0.1:18080 --state "$RUNNER_TEMP/support-router-smoke.json"
+          # Пересоздаём контейнер: статистика должна восстановиться именно из volume.
+          docker compose -p support-router-ci -f compose.release.yaml up -d --force-recreate --wait --wait-timeout 90 --pull never
+          python scripts/check_service.py --url http://127.0.0.1:18080 --state "$RUNNER_TEMP/support-router-smoke.json" --check-persistence
+
+      - name: Сохранить журнал контейнера
+        if: always()
+        run: |
+          mkdir -p reports
+          docker compose -p support-router-ci -f compose.release.yaml logs --no-color --tail 200 > reports/container.log 2>&1 || true
+
+      - name: Добавить метрики в результат запуска
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          report = json.loads(Path("reports/metrics.json").read_text(encoding="utf-8"))
+          summary = (
+              "### Проверенный комплект\n\n"
+              f"- Модель: {report['model_version']}\n"
+              f"- Данные: {report['data_version']}\n"
+              f"- Accuracy: {report['accuracy']:.4f}\n"
+              f"- Macro F1: {report['macro_f1']:.4f}\n"
+              f"- Порог качества: пройден\n"
+              f"- Образ: {os.environ['SUPPORT_ROUTER_IMAGE']}\n"
+          )
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
+              stream.write(summary)
+          PY
+
+      - name: Сохранить модель, отчёты и фактический DVC lock
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: support-router-${{ github.sha }}
+          path: |
+            support-router/models/model.joblib
+            support-router/reports/
+            support-router/params.toml
+            support-router/dvc.lock
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Опубликовать проверенный образ в GHCR
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$SUPPORT_ROUTER_IMAGE"
+          # pull обращается к реестру и подтверждает доступность опубликованного тега.
+          docker pull "$SUPPORT_ROUTER_IMAGE"
+          # main продвигается только после успешных проверок и отправки точной версии.
+          docker tag "$SUPPORT_ROUTER_IMAGE" "$IMAGE_REPOSITORY:main"
+          docker push "$IMAGE_REPOSITORY:main"
+          docker logout ghcr.io
+
+      - name: Остановить проверочный контейнер
+        if: always()
+        # Удаляется только временный проект runner; volume не удаляем.
+        run: docker compose -p support-router-ci -f compose.release.yaml down

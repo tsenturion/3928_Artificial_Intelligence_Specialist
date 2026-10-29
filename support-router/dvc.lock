@@ -1,0 +1,189 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: python -m support_router prepare
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: 92470f533d9dde460f95f57bcd463bcf.dir
+      size: 37163
+      nfiles: 2
+    - path: pyproject.toml
+      hash: md5
+      md5: 4be9045471140c1c226f8c0560da52ba
+      size: 1598
+    - path: src/support_router/__init__.py
+      hash: md5
+      md5: 4711feac482ee66031bd27d63c1c72f5
+      size: 537
+    - path: src/support_router/__main__.py
+      hash: md5
+      md5: 950ea9ad0abf4c60c972c8dd8bc695c0
+      size: 192
+    - path: src/support_router/cli.py
+      hash: md5
+      md5: 89ce0274b4e649cb51a2ab4d35651709
+      size: 3962
+    - path: src/support_router/config.py
+      hash: md5
+      md5: 114c6a2b0df8af66d878663084b6cb38
+      size: 2771
+    - path: src/support_router/data.py
+      hash: md5
+      md5: b23154f49d5beb0ae21d91f9a75b9906
+      size: 7121
+    - path: src/support_router/files.py
+      hash: md5
+      md5: e52b2ad4428a91876f9c2553145e8d0d
+      size: 1748
+    - path: src/support_router/logging_utils.py
+      hash: md5
+      md5: 99221acc56aabace664adfe9175b7685
+      size: 2189
+    params:
+      params.toml:
+        data.source: data/raw/tickets.csv
+        data.version: 1.0.0-synthetic
+    outs:
+    - path: data/processed
+      hash: md5
+      md5: 15251f0b7de6ef0eeaa85aababacaa16.dir
+      size: 35457
+      nfiles: 3
+  train:
+    cmd: python -m support_router train
+    deps:
+    - path: data/processed
+      hash: md5
+      md5: 15251f0b7de6ef0eeaa85aababacaa16.dir
+      size: 35457
+      nfiles: 3
+    - path: pyproject.toml
+      hash: md5
+      md5: 4be9045471140c1c226f8c0560da52ba
+      size: 1598
+    - path: src/support_router/__init__.py
+      hash: md5
+      md5: 4711feac482ee66031bd27d63c1c72f5
+      size: 537
+    - path: src/support_router/__main__.py
+      hash: md5
+      md5: 950ea9ad0abf4c60c972c8dd8bc695c0
+      size: 192
+    - path: src/support_router/cli.py
+      hash: md5
+      md5: 89ce0274b4e649cb51a2ab4d35651709
+      size: 3962
+    - path: src/support_router/config.py
+      hash: md5
+      md5: 114c6a2b0df8af66d878663084b6cb38
+      size: 2771
+    - path: src/support_router/data.py
+      hash: md5
+      md5: b23154f49d5beb0ae21d91f9a75b9906
+      size: 7121
+    - path: src/support_router/files.py
+      hash: md5
+      md5: e52b2ad4428a91876f9c2553145e8d0d
+      size: 1748
+    - path: src/support_router/logging_utils.py
+      hash: md5
+      md5: 99221acc56aabace664adfe9175b7685
+      size: 2189
+    - path: src/support_router/model.py
+      hash: md5
+      md5: 3954ae4e29529a157f1de75c6ce307f1
+      size: 6680
+    - path: src/support_router/text_profile.py
+      hash: md5
+      md5: daa99a917c39af1eccdd8669f4e48a08
+      size: 1574
+    params:
+      params.toml:
+        data.version: 1.0.0-synthetic
+        model:
+          version: 0.1.0
+          random_state: 42
+          ngram_min: 3
+          ngram_max: 5
+          C: 4.0
+          max_iter: 1000
+    outs:
+    - path: models/model.joblib
+      hash: md5
+      md5: 153e25d7d5ce9bbe51b5ccd6f111ba63
+      size: 120242
+  evaluate:
+    cmd: python -m support_router evaluate
+    deps:
+    - path: data/processed
+      hash: md5
+      md5: 15251f0b7de6ef0eeaa85aababacaa16.dir
+      size: 35457
+      nfiles: 3
+    - path: models/model.joblib
+      hash: md5
+      md5: 153e25d7d5ce9bbe51b5ccd6f111ba63
+      size: 120242
+    - path: pyproject.toml
+      hash: md5
+      md5: 4be9045471140c1c226f8c0560da52ba
+      size: 1598
+    - path: src/support_router/__init__.py
+      hash: md5
+      md5: 4711feac482ee66031bd27d63c1c72f5
+      size: 537
+    - path: src/support_router/__main__.py
+      hash: md5
+      md5: 950ea9ad0abf4c60c972c8dd8bc695c0
+      size: 192
+    - path: src/support_router/cli.py
+      hash: md5
+      md5: 89ce0274b4e649cb51a2ab4d35651709
+      size: 3962
+    - path: src/support_router/config.py
+      hash: md5
+      md5: 114c6a2b0df8af66d878663084b6cb38
+      size: 2771
+    - path: src/support_router/data.py
+      hash: md5
+      md5: b23154f49d5beb0ae21d91f9a75b9906
+      size: 7121
+    - path: src/support_router/evaluate.py
+      hash: md5
+      md5: 069fe2011653edba3095940a0a943f2c
+      size: 5403
+    - path: src/support_router/files.py
+      hash: md5
+      md5: e52b2ad4428a91876f9c2553145e8d0d
+      size: 1748
+    - path: src/support_router/logging_utils.py
+      hash: md5
+      md5: 99221acc56aabace664adfe9175b7685
+      size: 2189
+    - path: src/support_router/model.py
+      hash: md5
+      md5: 3954ae4e29529a157f1de75c6ce307f1
+      size: 6680
+    params:
+      params.toml:
+        data.version: 1.0.0-synthetic
+        evaluation.min_macro_f1: 0.75
+        model.version: 0.1.0
+    outs:
+    - path: reports/errors.csv
+      hash: md5
+      md5: c2ec794537c210738e0bc0d7ed2a955e
+      size: 190
+    - path: reports/metrics.json
+      hash: md5
+      md5: fc0bb74480eefb45a041b4fca8edc60c
+      size: 2194
+    - path: reports/predictions.csv
+      hash: md5
+      md5: 43b4cbd2c6678819db3569185270d8a7
+      size: 9296
+    - path: reports/scores.json
+      hash: md5
+      md5: f8ee2f08175ec60ee9c74a614a9875c7
+      size: 168

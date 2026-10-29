@@ -1,0 +1,14 @@
+# Запуск уже проверенного образа без сборки и обучения на целевой машине.
+# SUPPORT_ROUTER_IMAGE указывается в Обновить_приложение.ps1 или в окружении CI.
+services:
+  app:
+    image: ${SUPPORT_ROUTER_IMAGE:?Укажите полный тег образа GHCR}
+    ports:
+      - "127.0.0.1:${SUPPORT_ROUTER_PORT:-8080}:8000"
+    volumes:
+      # Совпадает с локальным compose.yaml: обновление сохраняет журналы и SQLite.
+      - app_logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  app_logs:

@@ -1,0 +1,76 @@
+# Команды запускаются из папки support-router в установленном Python-окружении.
+# До первого запуска: python -m pip install -e ".[dev,mlops]"
+# Управление_DVC.ps1 настраивает пути и локальное хранилище на Windows.
+stages:
+  prepare:
+    cmd: python -m support_router prepare
+    deps:
+      - data/raw
+      - src/support_router/__init__.py
+      - src/support_router/__main__.py
+      - src/support_router/cli.py
+      - src/support_router/config.py
+      - src/support_router/data.py
+      - src/support_router/files.py
+      - src/support_router/logging_utils.py
+      - pyproject.toml
+    params:
+      - params.toml:
+          - data.source
+          - data.version
+    outs:
+      - data/processed
+
+  train:
+    cmd: python -m support_router train
+    deps:
+      - data/processed
+      - src/support_router/__init__.py
+      - src/support_router/__main__.py
+      - src/support_router/cli.py
+      - src/support_router/config.py
+      - src/support_router/data.py
+      - src/support_router/files.py
+      - src/support_router/logging_utils.py
+      - src/support_router/model.py
+      - src/support_router/text_profile.py
+      - pyproject.toml
+    params:
+      - params.toml:
+          - data.version
+          - model
+    outs:
+      - models/model.joblib
+
+  evaluate:
+    cmd: python -m support_router evaluate
+    deps:
+      - data/processed
+      - models/model.joblib
+      - src/support_router/__init__.py
+      - src/support_router/__main__.py
+      - src/support_router/cli.py
+      - src/support_router/config.py
+      - src/support_router/data.py
+      - src/support_router/files.py
+      - src/support_router/logging_utils.py
+      - src/support_router/model.py
+      - src/support_router/evaluate.py
+      - pyproject.toml
+    params:
+      - params.toml:
+          - data.version
+          - model.version
+          - evaluation.min_macro_f1
+    # Все результаты можно восстановить из DVC, а не только заново вычислить.
+    outs:
+      - reports/metrics.json
+      - reports/predictions.csv
+      - reports/errors.csv
+    metrics:
+      - reports/scores.json
+
+# dvc.lock создаётся DVC и связывает эти зависимости с конкретными результатами.
+# Повторное dvc repro без изменений пропускает выполненные этапы.
+# Даты создания артефактов могут различаться при принудительном переобучении;
+# воспроизводятся вычисления и прогнозы, а не обязательное равенство всех байтов.

@@ -1,0 +1,23 @@
+# В контекст сборки попадают только перечисленные файлы.
+# Рабочие данные, DVC-хранилище, журналы и локальные зависимости не отправляются.
+*
+!pyproject.toml
+!params.toml
+!src/
+!src/**
+!frontend/
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/index.html
+!frontend/vite.config.js
+!frontend/src/
+!frontend/src/**
+!models/
+!models/model.joblib
+!reports/
+!reports/metrics.json
+**/__pycache__/
+**/*.py[cod]
+**/AGENTS.md
+**/CLAUDE.md
+**/GEMINI.md

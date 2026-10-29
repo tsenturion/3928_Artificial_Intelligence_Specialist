@@ -1,0 +1,14 @@
+services:
+  app:
+    # Имя образа пригодится для последующего выпуска версий через CI/CD.
+    image: support-router:${SUPPORT_ROUTER_IMAGE_TAG:-local}
+    build: .
+    ports:
+      # Порт 8080 не конфликтует с локальным запуском второго этапа на 8000.
+      - "127.0.0.1:${SUPPORT_ROUTER_PORT:-8080}:8000"
+    volumes:
+      # Журналы переживают замену контейнера; приложение ограничивает хранение 30 днями.
+      - app_logs:/app/logs
+
+volumes:
+  app_logs:

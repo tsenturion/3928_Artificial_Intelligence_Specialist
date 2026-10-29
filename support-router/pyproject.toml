@@ -1,0 +1,40 @@
+# Проект устанавливается из этой папки командой: python -m pip install -e ".[dev]"
+# -e связывает установленный пакет с исходниками; [dev] добавляет pytest для проверок.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "support-router"
+version = "0.1.0"
+description = "Классификация русскоязычных обращений пользователей"
+requires-python = ">=3.11"
+# Зафиксированы версии, на которых проверены обучение и загрузка модели.
+# Сохранённый scikit-learn Pipeline следует использовать в совместимом окружении.
+dependencies = [
+    "scikit-learn==1.8.0",
+    "numpy==2.4.6",
+    "scipy==1.17.0",
+    "joblib==1.5.3",
+    "threadpoolctl==3.6.0",
+    "fastapi==0.139.2",
+    "pydantic==2.13.4",
+    "uvicorn==0.52.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.5", "httpx==0.28.1"]
+# DVC нужен для подготовки релиза, но не устанавливается в рабочий контейнер API.
+# Версия фиксируется после проверки команд на текущем окружении.
+mlops = ["dvc==3.67.1"]
+
+[project.scripts]
+support-router = "support_router.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q -p no:cacheprovider"

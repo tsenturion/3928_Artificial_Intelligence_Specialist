@@ -1,0 +1,14 @@
+.venv/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+/data/processed/
+/models/
+/reports/
+/logs/
+/frontend/node_modules/
+/frontend/dist/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
