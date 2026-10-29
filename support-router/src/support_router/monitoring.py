@@ -1,4 +1,10 @@
-"""Метрики сервиса и входных данных; тексты обращений в хранилище не записываются."""
+"""Метрики сервиса и входных данных без записи текстов обращений.
+
+Наблюдение разделено на три вопроса: работает ли API, изменились ли входы,
+правильно ли отвечает модель на обращения с независимой разметкой.
+Один показатель не заменяет другой: HTTP 200 не означает правильную категорию,
+а изменение длины/словаря не доказывает снижение качества.
+"""
 
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -15,6 +21,8 @@ from support_router import CATEGORIES
 RETENTION_DAYS = 30
 MIN_DRIFT_SAMPLES = 20
 # Простые учебные эвристики, а не статистический тест или универсальные пороги.
+# Предупреждаем при более чем 40% необычных длин или падении покрытия словаря
+# более чем на 20 процентных пунктов. Для другого набора пороги надо обосновать.
 MAX_LENGTH_OUTLIER_SHARE = 0.40
 MAX_COVERAGE_DROP = 0.20
 
@@ -25,14 +33,22 @@ def _stamp(value: datetime) -> str:
 
 
 class MonitoringStore:
-    """Небольшое постоянное хранилище для одного процесса сервиса."""
+    """Хранит события небольшого сервиса в одном файле SQLite.
+
+    По строке на POST /api/predict: идентификатор, время, статус, длительность,
+    версии и числовой профиль успешного обращения. expected_category заполняется
+    позже, когда известен правильный ответ. Первичный ключ не допускает два
+    события с одним request_id.
+    """
 
     def __init__(self, path: Path):
+        """Открывает соединение, создаёт таблицу при первом запуске и очищает срок."""
         path.parent.mkdir(parents=True, exist_ok=True)
         # Обработчики FastAPI работают в разных потоках. Один Lock последовательно
         # выполняет операции с соединением; отдельный сервер БД здесь не требуется.
         self._lock = Lock()
         self._connection = sqlite3.connect(path, timeout=5, check_same_thread=False)
+        # Row позволяет обращаться к столбцам по имени вместо числового индекса.
         self._connection.row_factory = sqlite3.Row
         with self._connection:
             self._connection.execute("""
@@ -51,12 +67,18 @@ class MonitoringStore:
                     expected_category TEXT
                 )
             """)
+            # Индекс ускоряет выборку временного окна и удаление старых событий.
             self._connection.execute(
                 "CREATE INDEX IF NOT EXISTS events_time ON prediction_events(created_at)"
             )
             self._prune(datetime.now(timezone.utc))
 
     def _prune(self, now: datetime) -> None:
+        """Удаляет просроченные события внутри транзакции вызывающей операции.
+
+        Вызывается при открытии БД, записи, разметке и чтении отчёта.
+        Отдельного фонового планировщика очистки в этом небольшом сервисе нет.
+        """
         # Удаляются только записи этой таблицы старше 30 дней.
         self._connection.execute(
             "DELETE FROM prediction_events WHERE created_at < ?",
@@ -64,6 +86,7 @@ class MonitoringStore:
         )
 
     def close(self) -> None:
+        """Освобождает соединение после завершения обработки запросов."""
         with self._lock:
             self._connection.close()
 
@@ -71,10 +94,18 @@ class MonitoringStore:
         self, request_id: str, status_code: int, duration_ms: float,
         metadata: dict | None, details: dict | None = None, *, now: datetime | None = None,
     ) -> None:
-        """Фиксирует один POST /api/predict, включая ошибки валидации и недоступность."""
+        """Фиксирует попытку классификации, включая 422, 500 и 503.
+
+        metadata относится к загруженному обучению, details — к удачному ответу.
+        Для ошибки профиль и предсказание не записываются. now позволяет проверять
+        временные окна в тестах, не меняя часы операционной системы.
+        """
         now = now or datetime.now(timezone.utc)
         metadata = metadata or {}
         details = details if status_code == 200 and details else {}
+        # Lock защищает общее соединение от одновременного использования потоками.
+        # Контекст соединения подтверждает транзакцию при успехе и откатывает
+        # её при исключении; само соединение при этом остаётся открытым.
         with self._lock, self._connection:
             self._prune(now)
             # Значения передаются через ?, а не вставляются в SQL-строку.
@@ -91,7 +122,12 @@ class MonitoringStore:
             ))
 
     def label(self, request_id: str, expected_category: str) -> None:
-        """Привязывает правильную категорию к успешному запросу, не дублируя запись."""
+        """Записывает или исправляет метку существующего успешного обращения.
+
+        UPDATE изменяет строку, поэтому повтор той же разметки не увеличивает
+        размер выборки качества. Сервис проверяет категорию и наличие запроса,
+        но не умеет сам подтвердить истинность присланной метки.
+        """
         if expected_category not in CATEGORIES:
             raise ValueError("Неизвестная категория разметки.")
         with self._lock, self._connection:
@@ -101,13 +137,20 @@ class MonitoringStore:
                    WHERE request_id = ? AND status_code = 200 AND category IS NOT NULL""",
                 (expected_category, request_id),
             )
+            # Ноль изменённых строк означает отсутствие подходящего успешного ID.
             if cursor.rowcount != 1:
                 raise KeyError("Успешный запрос не найден или срок его хранения истёк.")
 
     def snapshot(
         self, metadata: dict | None, hours: int = 24, *, now: datetime | None = None,
     ) -> dict:
-        """API-метрики за окно; данные и качество только для текущего обучения."""
+        """Возвращает готовые агрегаты за скользящее окно последних hours часов.
+
+        traffic включает все попытки, в том числе при недоступной модели.
+        predictions/data/quality выбирают только успешные ответы текущего
+        обучения. При отсутствии наблюдений длительности равны None, при
+        отсутствии меток None означают невозможность оценки качества.
+        """
         if not 1 <= hours <= RETENTION_DAYS * 24:
             raise ValueError("Окно мониторинга должно быть от 1 до 720 часов.")
         now = now or datetime.now(timezone.utc)
@@ -117,6 +160,7 @@ class MonitoringStore:
                 "SELECT * FROM prediction_events WHERE created_at >= ? AND created_at <= ?",
                 (_stamp(now - timedelta(hours=hours)), _stamp(now)),
             ).fetchall()]
+        # Соединение освобождено: расчёт агрегатов не удерживает Lock.
         # Операционная статистика охватывает все запросы классификации, в том числе
         # ошибки при отсутствии модели. Проверки health и чтение панели сюда не входят.
         durations = [row["duration_ms"] for row in rows]
@@ -131,6 +175,8 @@ class MonitoringStore:
         ]
         reference = metadata.get("monitoring_reference") if metadata else None
         counts = Counter(row["category"] for row in current)
+        # Размеченная часть может отличаться от всего потока: её метрики нельзя
+        # автоматически переносить на все остальные обращения.
         labeled = [row for row in current if row["expected_category"] is not None]
         expected = [row["expected_category"] for row in labeled]
         predicted = [row["category"] for row in labeled]
@@ -177,11 +223,18 @@ class MonitoringStore:
 
 
 def data_summary(rows: list[dict], reference: dict | None) -> dict:
-    """Сигнал изменения характеристик входа; не оценка качества классификатора."""
+    """Сравнивает текущие числовые характеристики с профилем обучающей выборки.
+
+    no_reference — нет профиля для сравнения; insufficient_data — мало событий;
+    warning — превышен хотя бы один учебный порог; ok — эти пороги не превышены.
+    ok не исключает изменений, которые длина и покрытие словаря не отражают.
+    """
     usable = [row for row in rows if row["text_length"] is not None and row["coverage"] is not None]
     lengths = [row["text_length"] for row in usable]
     coverages = [row["coverage"] for row in usable]
     outside_share = None
+    # Сравниваем с границами обычной длины из train, не пересчитывая их
+    # по рабочим обращениям: ориентир должен оставаться независимым от потока.
     if reference and usable:
         outside_share = sum(
             not reference["length_p05"] <= length <= reference["length_p95"] for length in lengths

@@ -3,6 +3,8 @@
 # Архив готовит support-router/Подготовить_данные_CI.ps1.
 name: Support Router CI-CD
 
+# CI запускается при изменениях проекта и в pull request; workflow_dispatch
+# позволяет повторить процесс вручную. Публикация ниже разрешена только из main.
 on:
   push:
     branches: [main]
@@ -17,6 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  # Чтение нужно checkout и загрузке данных, packages:write — отправке в GHCR.
+  # GITHUB_TOKEN выдаётся runner автоматически и не хранится в исходниках.
   contents: read
   # Запись используется только шагом публикации из main; в PR публикация пропускается.
   packages: write
@@ -50,6 +54,9 @@ jobs:
         run: python -m pip install -e ".[dev,mlops]"
 
       - name: Восстановить выбранную версию данных через DVC
+        # Release хранит небольшой постоянный снимок raw, доступный чистому runner.
+        # Это отдельный объект от временных отчётов upload-artifact ниже.
+        # Восстанавливается только исходный набор; модель будет получена в CI.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -72,6 +79,8 @@ jobs:
         run: python -m pytest -p no:asyncio tests --junitxml=reports/tests.xml
 
       - name: Сформировать имя образа
+        # Адрес GHCR должен быть в нижнем регистре. Git-коммит связывает образ
+        # с исходным кодом; версии данных и модели находятся внутри артефакта.
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/support-router"
           echo "SUPPORT_ROUTER_IMAGE=$IMAGE:sha-$GITHUB_SHA" >> "$GITHUB_ENV"
@@ -79,6 +88,7 @@ jobs:
 
       - name: Собрать интерфейс и рабочий Docker-образ
         # Один и тот же образ проходит проверку и затем отправляется в реестр.
+        # OCI labels позволяют проследить репозиторий и коммит готового образа.
         run: |
           docker build \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
@@ -86,6 +96,8 @@ jobs:
             --tag "$SUPPORT_ROUTER_IMAGE" .
 
       - name: Проверить контейнер и сохранение мониторинга
+        # Отдельное имя Compose-проекта изолирует служебные контейнер и volume.
+        # --pull never использует только что собранный образ, а --wait ждёт healthcheck.
         run: |
           docker compose -p support-router-ci -f compose.release.yaml up -d --wait --wait-timeout 90 --pull never
           python scripts/check_service.py --url http://127.0.0.1:18080 --state "$RUNNER_TEMP/support-router-smoke.json"
@@ -94,6 +106,7 @@ jobs:
           python scripts/check_service.py --url http://127.0.0.1:18080 --state "$RUNNER_TEMP/support-router-smoke.json" --check-persistence
 
       - name: Сохранить журнал контейнера
+        # always() сохраняет диагностический вывод и после неуспешной проверки.
         if: always()
         run: |
           mkdir -p reports
@@ -119,6 +132,10 @@ jobs:
           PY
 
       - name: Сохранить модель, отчёты и фактический DVC lock
+        # CI-обучение имеет собственное время создания: фактический lock сохраняем
+        # с его результатами, не создавая автоматический коммит в main.
+        # Семь дней достаточно для разбора запуска; опубликованный образ хранится
+        # отдельно в GHCR и содержит модель с отчётом.
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -132,6 +149,9 @@ jobs:
           if-no-files-found: error
 
       - name: Опубликовать проверенный образ в GHCR
+        # После сбоя предыдущих проверок этот обычный шаг не выполняется.
+        # Тег main — удобный указатель на успешно доставленный выпуск;
+        # для выбора версии используйте также тег sha-<коммит> из журнала запуска.
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

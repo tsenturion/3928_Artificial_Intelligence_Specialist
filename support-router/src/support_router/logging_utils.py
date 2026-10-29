@@ -1,4 +1,9 @@
-"""Диагностика запусков с сохранением журналов не более 30 дней."""
+"""Диагностика запусков с сохранением журналов не более 30 дней.
+
+Один именованный logger используется всеми модулями. Консоль помогает при
+ручном запуске и в Docker logs, файл сохраняет причину сбоя между запусками.
+Тексты входящих обращений в сообщения журнала передавать не следует.
+"""
 
 from datetime import datetime, timedelta, timezone
 import logging
@@ -10,10 +15,16 @@ import time
 
 
 def configure_logging(log_dir: Path) -> logging.Logger:
-    """Подключает консоль и ежедневный файл, удаляет только устаревшие журналы приложения."""
+    """Настраивает logger для одного процесса и возвращает его вызывающему коду.
+
+    Повторная настройка закрывает старые handlers, чтобы сообщения не
+    дублировались и файлы не оставались открытыми. Обработчики фильтруют и
+    направляют сообщения; formatter задаёт одинаковый вид обеих копий.
+    """
     log_dir.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("support_router")
     # Закрываем старые обработчики до очистки: Windows не удаляет открытые журналы.
+    # Срез [:] создаёт копию списка, из исходного можно удалять элементы в цикле.
     for handler in logger.handlers[:]:
         handler.close()
         logger.removeHandler(handler)
@@ -25,11 +36,14 @@ def configure_logging(log_dir: Path) -> logging.Logger:
             if path.is_file() and path.stat().st_mtime < cutoff:
                 path.unlink()
     logger.setLevel(logging.INFO)
+    # Не передаём те же записи родительскому logger: Uvicorn или оболочка
+    # могли уже настроить корневую консольную обработку.
     logger.propagate = False
     file_handler = TimedRotatingFileHandler(
         log_dir / "support-router.log", when="midnight", backupCount=30,
         encoding="utf-8", utc=True,
     )
+    # stderr оставляет stdout свободным для машинного JSON-ответа команды predict.
     console_handler = logging.StreamHandler(sys.stderr)
     # Единый UTC-формат делает время событий однозначным между разными компьютерами.
     formatter = logging.Formatter(

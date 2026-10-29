@@ -3,6 +3,11 @@
 Сначала --state сохраняет ID размеченного обращения. После пересоздания
 контейнера --check-persistence проверяет сохранение этой записи в volume.
 Это небольшие синтетические запросы, которые попадут в настоящую статистику.
+
+Проверка дополняет pytest: тесты компонентов не доказывают, что в образ попали
+верная модель, настройки, ресурсы сборки и доступный для записи volume.
+Запускайте обычным Python без -O: здесь assert служит проверкой ожидаемого
+поведения и останавливает CI ненулевым кодом при несовпадении.
 """
 
 import argparse
@@ -14,11 +19,17 @@ from urllib.parse import urlparse
 from urllib.request import ProxyHandler, Request, build_opener
 
 
+# Проверяется localhost; системный прокси не должен перенаправлять эти запросы.
 HTTP = build_opener(ProxyHandler({}))
 
 
 def request(base_url, path, payload=None, expected_status=200):
-    """Проверяет HTTP-статус, не печатая тексты обращений или секреты."""
+    """Выполняет GET без payload или POST с JSON и проверяет ожидаемый статус.
+
+    Возвращает dict/list для JSON и bytes для HTML/ресурсов. HTTPError тоже
+    содержит ответ: так можно проверить предусмотренный HTTP 422 как успех
+    негативного сценария, а не считать любую HTTP-ошибку сбоем проверки.
+    """
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
     query = Request(base_url + path, data=body, headers={"Content-Type": "application/json"})
     try:
@@ -35,6 +46,13 @@ def request(base_url, path, payload=None, expected_status=200):
 
 
 def check(url, state_path, persistence=False):
+    """Проверяет работающий сервис и сохраняет либо читает контрольное состояние.
+
+    state_path содержит только ID и счётчики. Для проверки сохранения данных
+    между двумя вызовами нужно пересоздать контейнер с прежним volume.
+    Предполагается отдельный проверочный сервис без постороннего трафика:
+    иначе строгие сравнения счётчиков не будут однозначны.
+    """
     health = request(url, "/api/health")
     assert health["status"] == "ready" and health["model_loaded"]
     before = request(url, "/api/monitoring")
@@ -67,6 +85,8 @@ def check(url, state_path, persistence=False):
     request(url, "/api/feedback", {
         "request_id": prediction["request_id"], "expected_category": "delivery",
     })
+    # Ошибка пользовательского ввода должна учитываться в traffic, но не
+    # превращаться в предсказание или новый размеченный пример.
     request(url, "/api/predict", {"text": "!!!"}, expected_status=422)
     after = request(url, "/api/monitoring")
     assert after["traffic"]["requests"] == before["traffic"]["requests"] + 2
@@ -80,6 +100,7 @@ def check(url, state_path, persistence=False):
 
 
 def main():
+    """Разбирает адрес и путь состояния для двух фаз проверки контейнера."""
     parser = argparse.ArgumentParser(description="Проверка работающего контейнера")
     parser.add_argument("--url", default="http://127.0.0.1:8080")
     parser.add_argument("--state", required=True, type=Path)

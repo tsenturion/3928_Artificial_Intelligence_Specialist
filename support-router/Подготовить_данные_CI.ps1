@@ -7,6 +7,24 @@
 # отправьте тег и опубликуйте архив support-router-data.zip как asset его Release.
 # Затем отправьте main: CI сможет восстановить данные до начала обучения.
 # В архив нельзя включать реальные персональные обращения: репозиторий публичный.
+
+<#
+.SYNOPSIS
+    Создаёт архив DVC-данных для восстановления на чистом GitHub runner.
+.DESCRIPTION
+    Экспортирует только объекты, на которые указывает data/raw.dvc, во временный
+    remote. Затем архивирует этот remote и удаляет созданный временный экспорт.
+    Модели и отчёты в архив не включаются: CI получит их своим dvc repro.
+.PARAMETER OutputPath
+    Путь нового ZIP-файла. Существующий файл намеренно не перезаписывается.
+.EXAMPLE
+    .\Подготовить_данные_CI.ps1 -OutputPath "$env:TEMP\support-router-data.zip"
+    Создаёт asset для Release support-router-data-v<версия из params.toml>.
+.NOTES
+    Скрипт не делает commit, push и публикацию Release. Инструкция по порядку
+    этих операций приведена выше. Нужны PowerShell 7, DVC и доступные данные в
+    локальном кеше. После изменения CSV сначала обновите его указатель DVC.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -22,6 +40,7 @@ $projectPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 $pythonExecutable = if (Test-Path -LiteralPath $projectPython) { $projectPython } else { (Get-Command python).Source }
 $exportRoot = Join-Path ([IO.Path]::GetTempPath()) ("sr-ci-" + [guid]::NewGuid().ToString("N"))
 $exportStorage = Join-Path $exportRoot "storage"
+# Уникальное имя remote не заменяет пользовательское хранилище local.
 $remoteName = "export-ci-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
 $remoteAdded = $false
 $previousUtf8 = $env:PYTHONUTF8
@@ -34,6 +53,7 @@ try {
     & $pythonExecutable -m dvc remote add --local $remoteName $exportStorage
     if ($LASTEXITCODE -ne 0) { throw "Не удалось настроить временный экспорт DVC." }
     $remoteAdded = $true
+    # push работает с выбранной DVC-версией, а не произвольными файлами каталога.
     & $pythonExecutable -m dvc push data/raw.dvc --remote $remoteName
     if ($LASTEXITCODE -ne 0) { throw "Экспорт данных DVC завершился с ошибкой." }
     # Здесь нет чтения или удаления существующего кеша: архивируется новый экспорт.

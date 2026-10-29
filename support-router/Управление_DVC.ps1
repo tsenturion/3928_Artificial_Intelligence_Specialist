@@ -10,6 +10,45 @@
 # Содержимое данных и модели хранится отдельно. Сам DVC не делает git commit/push.
 # Хранилище этого компьютера задаётся в .dvc/config.local (оно не попадёт в Git).
 # На другой машине укажите существующее доступное хранилище через -StoragePath.
+
+<#
+.SYNOPSIS
+    Управляет версиями данных, модели и результатами этапов DVC.
+.DESCRIPTION
+    Git хранит исходники и указатели, cache — локальные объекты DVC,
+    remote — отдельную копию объектов для восстановления на другой машине.
+    Локальный путь remote не является доступным облачным хранилищем для CI.
+    GitHub Actions восстанавливает raw из опубликованного снимка в Release.
+.PARAMETER Action
+    init — настроить local, подготовить комплект и отправить объекты;
+    repro — пересчитать изменившиеся этапы и проверить комплект;
+    verify — проверить готовую модель с отчётом без пересчёта;
+    push/pull — отправить/восстановить объекты, не отправляя коммит Git;
+    status — показать изменения относительно текущих указателей.
+.PARAMETER StoragePath
+    Доступный путь DVC-хранилища вне всего Git-репозитория. При первом запуске
+    без параметра создаётся локальное хранилище пользователя.
+.EXAMPLE
+    .\Управление_DVC.ps1 -Action init
+    Первичная подготовка, когда data/raw уже присутствует на компьютере.
+.EXAMPLE
+    .\Управление_DVC.ps1 -Action pull -StoragePath "D:\DVC\support-router"
+    Восстановление из существующего хранилища с нужными объектами.
+.EXAMPLE
+    gh release download support-router-data-v1.0.0-synthetic -R tsenturion/3928_Artificial_Intelligence_Specialist -p support-router-data.zip -D "$env:TEMP\support-router-bootstrap"
+    Expand-Archive -LiteralPath "$env:TEMP\support-router-bootstrap\support-router-data.zip" -DestinationPath "$env:TEMP\support-router-bootstrap\storage"
+    python -m dvc remote add --local bootstrap "$env:TEMP\support-router-bootstrap\storage"
+    python -m dvc pull data/raw.dvc --remote bootstrap
+    .\Управление_DVC.ps1 -Action init
+    Первый запуск после git clone без прежнего локального remote. Команды
+    выполняются из папки проекта в окружении с DVC; также нужен GitHub CLI.
+    Версия Release должна соответствовать data.version в выбранном params.toml.
+.NOTES
+    Требуется PowerShell 7. init с пустым remote не восстановит отсутствующие
+    объекты: сначала нужен исходный CSV или доступный снимок данных.
+    Изменение файлов-источников, включая комментарии в deps, может вызвать
+    пересчёт DVC; проверять текущую модель без него позволяет Action verify.
+#>
 [CmdletBinding()]
 param(
     [ValidateSet("init", "repro", "verify", "push", "pull", "status")]
@@ -26,6 +65,8 @@ if (Test-Path -LiteralPath $projectPython) {
 }
 
 function Invoke-ProjectPython {
+    # Ошибка внешней программы не всегда превращается в исключение PowerShell.
+    # Явная проверка LASTEXITCODE делает остановку процесса подготовки обязательной.
     param([string[]]$PythonArguments)
     & $pythonExecutable @PythonArguments
     if ($LASTEXITCODE -ne 0) {
@@ -97,6 +138,8 @@ try {
         )
     }
     if ($Action -in @("init", "repro")) {
+        # add обновляет указатель raw при наличии исходников, pull восстанавливает
+        # выбранный снимок при их отсутствии. Саму цепочку вычислений запускает repro.
         if (Test-Path -LiteralPath "data\raw") {
             Invoke-ProjectPython -PythonArguments @("-m", "dvc", "add", "data/raw")
         } else {
@@ -108,6 +151,7 @@ try {
             Invoke-ProjectPython -PythonArguments @("-m", "dvc", "push")
         }
     } elseif ($Action -eq "pull") {
+        # Успешного копирования недостаточно: комплект должен пройти verify.
         Invoke-ProjectPython -PythonArguments @("-m", "dvc", "pull")
         Invoke-ProjectPython -PythonArguments @("-X", "utf8", "-m", "support_router", "verify")
     } elseif ($Action -eq "push") {

@@ -11,6 +11,25 @@
 #
 # Для правки фронтенда можно отдельно выполнить в frontend команду npm run dev.
 # Vite будет пересылать /api на работающий FastAPI (по умолчанию порт 8000).
+
+<#
+.SYNOPSIS
+    Запускает FastAPI с готовой моделью и интерфейсом по одному адресу.
+.DESCRIPTION
+    Модель должна быть подготовлена заранее. Скрипт проверяет сборку интерфейса,
+    задаёт путь конфигурации и запускает один процесс Uvicorn. Модель и SQLite
+    открываются в lifespan приложения, HTTP-документация доступна по /docs.
+.PARAMETER Port
+    Локальный порт сервиса, по умолчанию 8000.
+.PARAMETER SkipFrontendBuild
+    Использует уже существующую сборку интерфейса.
+.EXAMPLE
+    .\Запустить_приложение.ps1 -SkipFrontendBuild -Port 8000
+    Повторный запуск с готовой сборкой; Ctrl+C останавливает процесс.
+.NOTES
+    Команда не обучает модель. Пояснения к ML и HTTP-контракту находятся в
+    src/support_router/model.py, schemas.py и api.py. Требуется PowerShell 7.
+#>
 [CmdletBinding()]
 param(
     [ValidateRange(1024, 65535)]
@@ -48,6 +67,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot "frontend\dist\index.h
 }
 
 $previousPythonPath = $env:PYTHONPATH
+# Настройки передаются только запускаемому процессу и затем возвращаются.
+# Это позволяет иметь несколько учебных проектов с разными конфигурациями.
 $previousConfig = $env:SUPPORT_ROUTER_CONFIG
 try {
     $env:PYTHONPATH = Join-Path $PSScriptRoot "src"

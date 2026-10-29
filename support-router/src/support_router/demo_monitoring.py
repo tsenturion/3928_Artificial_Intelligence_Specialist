@@ -6,6 +6,9 @@
 
 Запросы намеренно попадают в настоящие метрики. Первая группа берётся из
 синтетического контроля и получает известные метки; сдвинутые тексты не размечаем.
+Повторный запуск добавляет новые события с теми же учебными примерами, а не
+новую независимую выборку качества. --shift сначала отправляет обычную группу,
+затем добавляет посторонние тексты. Исходный CSV должен быть восстановлен DVC.
 """
 
 import argparse
@@ -24,6 +27,8 @@ LOCAL_HTTP = build_opener(ProxyHandler({}))
 
 
 def send(base_url: str, path: str, payload: dict) -> dict:
+    """Отправляет JSON локальному сервису и возвращает его JSON-ответ."""
+    # HTTP передаёт байты: dumps создаёт JSON-строку, encode задаёт её UTF-8.
     request = Request(
         base_url.rstrip("/") + path,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -34,6 +39,7 @@ def send(base_url: str, path: str, payload: dict) -> dict:
 
 
 def main() -> None:
+    """Показывает разницу между обычным потоком, разметкой и необычными входами."""
     parser = argparse.ArgumentParser(description="Синтетические запросы для мониторинга")
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--shift", action="store_true", help="Дополнительно отправить 24 необычных текста")
@@ -44,6 +50,8 @@ def main() -> None:
         parser.error("Укажите локальный HTTP-адрес приложения.")
     settings = load_settings()
     rows = read_records(settings.source, raw=True)
+    # Для отсутствующего ключа defaultdict сам создаёт список. Отбираем поровну
+    # примеров каждого направления, чтобы состав демонстрации был понятен.
     by_category = defaultdict(list)
     for row in rows:
         if row["split"] == "test":
@@ -52,6 +60,8 @@ def main() -> None:
     for partition in by_category.values():
         for row in partition[:6]:
             prediction = send(args.url, "/api/predict", {"text": row["text"]})
+            # Метка берётся из подготовленного примера, а не из ответа модели:
+            # иначе точность отражала бы согласие модели с самой собой.
             send(args.url, "/api/feedback", {
                 "request_id": prediction["request_id"], "expected_category": row["category"],
             })

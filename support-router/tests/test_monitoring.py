@@ -1,4 +1,9 @@
-"""Проверки наблюдаемости: сохранение, разметка, версии, срок хранения и сигналы."""
+"""Проверки сохранения, разметки, версий, срока хранения и сигналов мониторинга.
+
+Отдельно проверяются SQLite-операции и их включение в HTTP-процесс. Временная
+БД позволяет безопасно создавать старые события, имитировать сбой записи
+и запускать параллельные обращения. Рабочая статистика приложения не меняется.
+"""
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -34,6 +39,7 @@ def details(category="delivery", length=40, coverage=0.95):
 
 
 def test_store_survives_restart_and_counts_only_the_current_training(tmp_path):
+    """Вся нагрузка остаётся в traffic, но качество относится к текущему обучению."""
     path = tmp_path / "monitoring.sqlite3"
     store = MonitoringStore(path)
     store.record("old", 200, 10, metadata("другое-обучение"), details())
@@ -70,6 +76,7 @@ def test_retention_removes_expired_events_and_labels(tmp_path):
 
 
 def test_drift_requires_a_reference_and_enough_samples(tmp_path):
+    """Необычные входы без правильных меток не создают вымышленную точность."""
     store = MonitoringStore(tmp_path / "monitoring.sqlite3")
     try:
         assert store.snapshot(None)["data"]["status"] == "no_reference"
@@ -188,6 +195,7 @@ def test_monitoring_does_not_store_the_text(service_config):
 
 
 def test_storage_failure_does_not_break_classification(service_config, monkeypatch):
+    """Сбой наблюдения диагностируется, а успешное предсказание остаётся доступным."""
     app = api.create_app(service_config)
     with TestClient(app) as client:
         def fail(*args, **kwargs):

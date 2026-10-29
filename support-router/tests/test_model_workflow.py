@@ -1,4 +1,9 @@
-"""Проверки ограничены основой модели: данные, отсутствие утечки, артефакт и команды."""
+"""Проверки данных, отсутствия утечки, сохранения модели и кодов завершения CLI.
+
+Фикстура settings копирует исходный CSV во временную папку: изменение тестового
+примера не портит учебный набор, готовую модель или рабочие отчёты.
+Проверки устанавливают свойства процесса, а не подбирают параметры по test.
+"""
 
 import csv
 from dataclasses import replace
@@ -28,7 +33,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def settings(tmp_path):
-    """Каждая проверка работает в своей папке и не меняет артефакты проекта."""
+    """Даёт каждой проверке отдельные пути к данным и будущим результатам.
+
+    tmp_path создаёт pytest. Копируются небольшие синтетические данные;
+    зависимости и модели из внешних источников здесь не загружаются.
+    """
     raw = tmp_path / "data" / "raw"
     raw.mkdir(parents=True)
     shutil.copyfile(PROJECT_ROOT / "data" / "raw" / "tickets.csv", raw / "tickets.csv")
@@ -102,6 +111,7 @@ def test_training_requires_matching_prepared_data_version(settings):
 
 
 def test_pipeline_uses_only_training_vocabulary_and_restores_in_a_new_process(settings):
+    """Уникальный фрагмент из test не должен попадать в обученный словарь."""
     rows = raw_rows(settings.source)
     for row in rows:
         if row["split"] == "test":
@@ -132,6 +142,7 @@ def test_pipeline_uses_only_training_vocabulary_and_restores_in_a_new_process(se
 
 
 def test_evaluation_reports_are_consistent_and_do_not_refit(settings, monkeypatch):
+    """Оценка сохраняет согласованный отчёт, не меняя обученный Pipeline."""
     prepare(settings)
     train(settings)
     artifact = load_model(settings.model_path)

@@ -1,4 +1,8 @@
-"""Оценка сохранённой модели на фиксированной контрольной выборке."""
+"""Оценка сохранённой модели на фиксированной контрольной выборке.
+
+Здесь сравнивается модель с простым baseline и формируется решение quality_gate.
+Предсказания и ошибки сохраняются для разбора, а не для дообучения на test.
+"""
 
 from collections import Counter
 from datetime import datetime, timezone
@@ -18,12 +22,23 @@ LOGGER = logging.getLogger("support_router")
 
 
 def quality_gate(macro_f1: float, baseline_f1: float, threshold: float) -> bool:
-    """Проверяет заданный минимум и преимущество над простейшим классификатором."""
+    """Возвращает допуск выпуска: достигнут порог и превзойдён baseline.
+
+    macro-F1 учитывает каждую категорию равноправно при неравном числе примеров.
+    Одного превышения baseline недостаточно: нужен заданный минимум.
+    И наоборот, проход по порогу не должен скрывать результат хуже baseline.
+    """
     return macro_f1 >= threshold and macro_f1 > baseline_f1
 
 
 def evaluate(settings: Settings) -> dict:
-    """Сохраняет метрики и ошибки отдельных обращений, ничего не переобучая."""
+    """Оценивает сохранённый Pipeline на фиксированном test и возвращает отчёт.
+
+    Пишет метрики и отдельные прогнозы/ошибки; контрольная выборка служит
+    итоговой проверке, а не поиску лучшего набора гиперпараметров.
+    fit вызывается только для отдельного DummyClassifier на train.
+    Непройденный порог тоже записывается для диагностики; cli вернёт код 2.
+    """
     train_rows, test_rows = load_partitions(settings)
     artifact = load_model(settings.model_path)
     metadata = artifact["metadata"]
@@ -35,12 +50,18 @@ def evaluate(settings: Settings) -> dict:
     expected = [row["category"] for row in test_rows]
     pipeline = artifact["pipeline"]
     predicted = pipeline.predict(texts)
+    # Для каждого обращения сохраняется оценка вероятности выбранного класса;
+    # порядок столбцов задаёт сам обученный классификатор.
+    # axis=1 выбирает максимум среди категорий для каждого обращения.
     probabilities = pipeline.predict_proba(texts).max(axis=1)
     labels = list(CATEGORIES)
     # Базовая модель всегда отвечает наиболее частой категорией из train.
+    # Её частота определяется только train, иначе контроль влиял бы на эталон.
     baseline = DummyClassifier(strategy="most_frequent")
     baseline.fit([row["text"] for row in train_rows], [row["category"] for row in train_rows])
     baseline_predictions = baseline.predict(texts)
+    # Общий список labels фиксирует четыре категории во всём отчёте.
+    # zero_division=0 задаёт результат для неопределимой оценки отдельного класса.
     macro_f1 = float(f1_score(expected, predicted, labels=labels, average="macro", zero_division=0))
     baseline_f1 = float(f1_score(
         expected, baseline_predictions, labels=labels, average="macro", zero_division=0
@@ -59,16 +80,22 @@ def evaluate(settings: Settings) -> dict:
         "macro_f1": macro_f1,
         "baseline_accuracy": float(accuracy_score(expected, baseline_predictions)),
         "baseline_macro_f1": baseline_f1,
+        # Порог записан рядом с результатом: изменение params.toml после оценки
+        # требует новой проверки перед выпуском.
         "quality_gate": {"min_macro_f1": settings.min_macro_f1, "passed": passed},
         "category_names": CATEGORIES,
         "classification_report": classification_report(
             expected, predicted, labels=labels, output_dict=True, zero_division=0
         ),
+        # В матрице строки — правильные категории, столбцы — ответы модели;
+        # labels сохраняет смысл индексов после превращения массива в JSON.
         "confusion_matrix": {"labels": labels, "values": confusion_matrix(
             expected, predicted, labels=labels
         ).tolist()},
         "limitation": "Контроль синтетический; результат не оценивает качество на реальных клиентах.",
     }
+    # Эти тексты относятся к синтетическому контрольному CSV.
+    # Рабочий мониторинг пользовательских запросов тексты не записывает.
     details = [
         {
             "ticket_id": row["ticket_id"], "text": row["text"],

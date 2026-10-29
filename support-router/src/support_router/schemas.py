@@ -1,4 +1,11 @@
-"""Контракт HTTP API: какие данные принимает и возвращает сервис."""
+"""Контракт HTTP API: какие данные принимает и возвращает сервис.
+
+Pydantic проверяет JSON до вызова обработчика, а response_model проверяет ответ
+перед отправкой. Эти же описания FastAPI включает в OpenAPI и страницу /docs.
+Типы защищают границы API; они не заменяют проверку данных для обучения.
+В обычной Python-функции аннотация сама по себе ввод не проверяет:
+здесь проверку выполняет именно Pydantic при создании модели из запроса.
+"""
 
 from typing import Annotated, Literal
 
@@ -15,6 +22,7 @@ Probability = Annotated[float, Field(ge=0, le=1)]
 class PredictionRequest(BaseModel):
     """JSON с одним текстом; числа, пустые строки и лишние поля отклоняются."""
 
+    # Запрещаем незаявленные поля: опечатка в запросе не должна молча игнорироваться.
     model_config = ConfigDict(extra="forbid")
     text: str = Field(
         strict=True, min_length=3, max_length=MAX_TEXT_LENGTH,
@@ -25,6 +33,8 @@ class PredictionRequest(BaseModel):
     @field_validator("text")
     @classmethod
     def validate_text(cls, value: str) -> str:
+        """Дополнительно проверяет смысл строки и возвращает нормализованный текст."""
+        # Field проверяет тип и длину, а валидатор отвергает, например, "!!!".
         # Та же обработка используется при обучении и в сохранённом Pipeline.
         return normalize_text(value)
 
@@ -35,6 +45,7 @@ class PredictionResponse(BaseModel):
     category: Category
     category_name: str
     probability: Probability
+    # Ключи — идентификаторы из classes_ модели, значения — числовые оценки.
     probabilities: dict[Category, Probability]
     model_version: str
     data_version: str
@@ -45,11 +56,15 @@ class FeedbackRequest(BaseModel):
     """Разметка приходит отдельно: предсказание нельзя выдавать за правильный ответ."""
 
     model_config = ConfigDict(extra="forbid")
+    # Формат соответствует uuid4().hex, который сервер вернул в ответе.
+    # Правильный формат ещё не означает существование записи: это проверяет SQLite.
     request_id: str = Field(strict=True, pattern=r"^[0-9a-f]{32}$")
     expected_category: Category
 
 
 class FeedbackResponse(BaseModel):
+    """Подтверждает принятую метку; не содержит оценки качества всей модели."""
+
     request_id: str
     expected_category: Category
 

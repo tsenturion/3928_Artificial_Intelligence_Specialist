@@ -1,8 +1,13 @@
 # Команды запускаются из папки support-router в установленном Python-окружении.
 # До первого запуска: python -m pip install -e ".[dev,mlops]"
 # Управление_DVC.ps1 настраивает пути и локальное хранилище на Windows.
+# Каждый этап задаёт команду, её входы deps, влияющие параметры params и результаты.
+# Связи через файлы создают порядок prepare → train → evaluate.
+# DVC отслеживает файлы целиком: даже правка комментария в deps может вызвать
+# пересчёт этапа. Содержимое dvc.lock вручную редактировать не следует.
 stages:
   prepare:
+    # Проверка исходного CSV и создание фиксированных выборок с manifest.
     cmd: python -m support_router prepare
     deps:
       - data/raw
@@ -14,6 +19,7 @@ stages:
       - src/support_router/files.py
       - src/support_router/logging_utils.py
       - pyproject.toml
+    # Смена источника или версии требует заново проверить подготовленные данные.
     params:
       - params.toml:
           - data.source
@@ -22,6 +28,8 @@ stages:
       - data/processed
 
   train:
+    # Вход — готовые выборки; результат — Pipeline вместе с метаданными.
+    # Зависимость от всего раздела model включает все параметры обучения.
     cmd: python -m support_router train
     deps:
       - data/processed
@@ -43,6 +51,8 @@ stages:
       - models/model.joblib
 
   evaluate:
+    # Применяем сохранённую модель к test, сравниваем с baseline и порогом.
+    # Ненулевой код команды при непрохождении порога останавливает DVC и CI.
     cmd: python -m support_router evaluate
     deps:
       - data/processed
@@ -68,9 +78,12 @@ stages:
       - reports/predictions.csv
       - reports/errors.csv
     metrics:
+      # Плоский JSON с числами удобен для dvc metrics show/diff между Git-версиями.
       - reports/scores.json
 
 # dvc.lock создаётся DVC и связывает эти зависимости с конкретными результатами.
 # Повторное dvc repro без изменений пропускает выполненные этапы.
 # Даты создания артефактов могут различаться при принудительном переобучении;
 # воспроизводятся вычисления и прогнозы, а не обязательное равенство всех байтов.
+# dvc repro пересчитывает нужные этапы локально; dvc push отдельно сохраняет
+# результаты в remote. Ни одна из этих команд не отправляет Git-коммит.

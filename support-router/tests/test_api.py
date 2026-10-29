@@ -1,4 +1,10 @@
-"""Проверки второго этапа: жизненный цикл модели, контракт HTTP и выдача интерфейса."""
+"""Проверки жизненного цикла FastAPI, контракта HTTP и выдачи собранных ресурсов.
+
+TestClient обращается к приложению внутри процесса, без отдельного Uvicorn.
+Его контекст запускает lifespan, поэтому проверяется реальная загрузка модели.
+Docker-сборку и соединение с работающим контейнером отдельно проверяет
+scripts/check_service.py: эти два уровня проверки дополняют друг друга.
+"""
 
 from pathlib import Path
 import shutil
@@ -32,6 +38,7 @@ def config_path(tmp_path_factory):
 
 
 def test_model_loads_once_and_requests_do_not_refit(config_path, monkeypatch):
+    """Один запуск загружает один Pipeline, а HTTP-запросы не вызывают обучение."""
     real_load = api.load_model
     loads = []
 
