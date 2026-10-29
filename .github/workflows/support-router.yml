@@ -138,8 +138,11 @@ jobs:
         run: |
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           docker push "$SUPPORT_ROUTER_IMAGE"
-          # pull обращается к реестру и подтверждает доступность опубликованного тега.
-          docker pull "$SUPPORT_ROUTER_IMAGE"
+          # Проверяем реальный скрипт доставки в PowerShell 7: pull из GHCR,
+          # проверку модели внутри образа и запуск без повторной сборки.
+          COMPOSE_PROJECT_NAME=support-router-ci pwsh -NoProfile -File ./Обновить_приложение.ps1 \
+            -Image "$SUPPORT_ROUTER_IMAGE" -Port 18080
+          python scripts/check_service.py --url http://127.0.0.1:18080 --state "$RUNNER_TEMP/support-router-smoke.json" --check-persistence
           # main продвигается только после успешных проверок и отправки точной версии.
           docker tag "$SUPPORT_ROUTER_IMAGE" "$IMAGE_REPOSITORY:main"
           docker push "$IMAGE_REPOSITORY:main"

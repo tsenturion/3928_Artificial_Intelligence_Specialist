@@ -32,7 +32,8 @@ try {
         throw "Образ не скачан; прежний контейнер не заменён. Проверьте тег и docker login ghcr.io."
     }
     # Перед заменой работающего приложения проверяем комплект внутри нового образа.
-    & $docker run --rm --entrypoint python $Image -m support_router verify
+    # Пакет установлен в site-packages, а конфигурация образа находится в /app.
+    & $docker run --rm --entrypoint python $Image -m support_router --config /app/params.toml verify
     if ($LASTEXITCODE -ne 0) { throw "Комплект модели не прошёл проверку; обновление остановлено." }
     & $docker compose -f compose.release.yaml up -d --wait --wait-timeout 90 --pull never
     if ($LASTEXITCODE -ne 0) {
